@@ -32,6 +32,7 @@ import (
 )
 
 func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
+	{{.middlewareInits}}
 	{{.routesAdditions}}
 }
 `
@@ -84,6 +85,23 @@ func genRoutes(dir, rootPkg string, cfg *config.Config, api *spec.ApiSpec) error
 	templateText, err := pathx.LoadTemplate(category, routesAdditionTemplateFile, routesAdditionTemplate)
 	if err != nil {
 		return err
+	}
+
+	// init middlewares
+	var (
+		middlewareInits  []string
+		middlewareInited = make(map[string]bool)
+	)
+	for _, g := range groups {
+		if len(g.middlewares) > 0 {
+			params := g.middlewares
+			for _, v := range params {
+				if _, ok := middlewareInited[v]; !ok {
+					middlewareInited[v] = true
+					middlewareInits = append(middlewareInits, fmt.Sprintf("_%s := middleware.New%s(serverCtx)", v, v))
+				}
+			}
+		}
 	}
 
 	var hasTimeout bool
@@ -148,7 +166,7 @@ rest.WithPrefix("%s"),`, g.prefix)
 			gbuilder.WriteString("\n}...,")
 			params := g.middlewares
 			for i := range params {
-				params[i] = "serverCtx." + params[i]
+				params[i] = "_" + params[i] + ".Handle"
 			}
 			middlewareStr := strings.Join(params, ", ")
 			routes = fmt.Sprintf("rest.WithMiddlewares(\n[]rest.Middleware{ %s }, \n %s \n),",
@@ -190,6 +208,7 @@ rest.WithPrefix("%s"),`, g.prefix)
 		data: map[string]any{
 			"hasTimeout":      hasTimeout,
 			"importPackages":  genRouteImports(rootPkg, api),
+			"middlewareInits": strings.Join(middlewareInits, "\n\t"),
 			"routesAdditions": strings.TrimSpace(builder.String()),
 		},
 	})
@@ -198,7 +217,11 @@ rest.WithPrefix("%s"),`, g.prefix)
 func genRouteImports(parentPkg string, api *spec.ApiSpec) string {
 	importSet := collection.NewSet()
 	importSet.AddStr(fmt.Sprintf("\"%s\"", pathx.JoinPackages(parentPkg, contextDir)))
+	var hasMiddleware bool
 	for _, group := range api.Service.Groups {
+		if len(group.GetAnnotation("middleware")) > 0 {
+			hasMiddleware = true
+		}
 		for _, route := range group.Routes {
 			folder := route.GetAnnotation(groupProperty)
 			if len(folder) == 0 {
@@ -210,6 +233,9 @@ func genRouteImports(parentPkg string, api *spec.ApiSpec) string {
 			importSet.AddStr(fmt.Sprintf("%s \"%s\"", toPrefix(folder),
 				pathx.JoinPackages(parentPkg, handlerDir, folder)))
 		}
+	}
+	if hasMiddleware {
+		importSet.AddStr(fmt.Sprintf("\"%s\"", pathx.JoinPackages(parentPkg, middlewareDir)))
 	}
 	imports := importSet.KeysStr()
 	sort.Strings(imports)

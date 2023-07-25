@@ -1,12 +1,19 @@
 package middleware
 
-import "net/http"
+import (
+	"net/http"
+
+	{{.importPackages}}
+)
 
 type {{.name}} struct {
+	svcCtx *svc.ServiceContext
 }
 
-func New{{.name}}() *{{.name}} {
-	return &{{.name}}{}
+func New{{.name}}(svcCtx *svc.ServiceContext) *{{.name}} {
+	return &{{.name}}{
+		svcCtx: svcCtx,
+	}
 }
 
 func (m *{{.name}})Handle(next http.HandlerFunc) http.HandlerFunc {
